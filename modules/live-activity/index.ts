@@ -26,6 +26,10 @@ export interface ActivityStateChangeEvent {
   progress: number;
 }
 
+export interface WidgetActionEvent {
+  action: "advance" | "end";
+}
+
 const LiveActivityNative = requireNativeModule("LiveActivity");
 const emitter = new EventEmitter(LiveActivityNative);
 
@@ -42,8 +46,15 @@ export async function updateActivity(
   return LiveActivityNative.updateActivity(activityId, state);
 }
 
-export async function endActivity(activityId: string): Promise<void> {
-  return LiveActivityNative.endActivity(activityId);
+export interface EndActivityOptions extends LiveActivityContentState {
+  dismissAfterSeconds?: number;
+}
+
+export async function endActivity(
+  activityId: string,
+  options?: EndActivityOptions
+): Promise<void> {
+  return LiveActivityNative.endActivity(activityId, options ?? null);
 }
 
 export function getActivityState(): ActivityState | null {
@@ -54,4 +65,10 @@ export function addActivityStateChangeListener(
   listener: (event: ActivityStateChangeEvent) => void
 ): Subscription {
   return emitter.addListener("onActivityStateChange", listener);
+}
+
+export function addWidgetActionListener(
+  listener: (event: WidgetActionEvent) => void
+): Subscription {
+  return emitter.addListener("onWidgetAction", listener);
 }

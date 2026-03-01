@@ -25,6 +25,7 @@ import {
   endActivity,
   getActivityState,
   addActivityStateChangeListener,
+  addWidgetActionListener,
 } from '../../modules/live-activity';
 
 const STEPS = [
@@ -113,6 +114,47 @@ export default function HomeScreen() {
       setStepIndex(0);
       stepRef.current = 0;
     }
+  }, []);
+
+  // Handle widget button taps — all logic lives here in TS
+  useEffect(() => {
+    const sub = addWidgetActionListener(async (event) => {
+      const id = activityIdRef.current;
+      if (!id) return;
+
+      if (event.action === 'advance') {
+        const next = Math.min(stepRef.current + 1, STEPS.length - 1);
+        stepRef.current = next;
+        setStepIndex(next);
+
+        if (next === STEPS.length - 1) {
+          await endActivity(id, {
+            value: STEPS[next].label,
+            progress: STEPS[next].progress,
+            dismissAfterSeconds: 4,
+          });
+          // Reset after dismiss delay
+          setTimeout(() => {
+            activityIdRef.current = null;
+            setActivityId(null);
+            setStepIndex(0);
+            stepRef.current = 0;
+          }, 4000);
+        } else {
+          await updateActivity(id, {
+            value: STEPS[next].label,
+            progress: STEPS[next].progress,
+          });
+        }
+      } else if (event.action === 'end') {
+        await endActivity(id);
+        activityIdRef.current = null;
+        setActivityId(null);
+        setStepIndex(0);
+        stepRef.current = 0;
+      }
+    });
+    return () => sub.remove();
   }, []);
 
   // Listen for real-time state changes from the widget (via contentUpdates)

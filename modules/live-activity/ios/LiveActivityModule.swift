@@ -4,9 +4,6 @@ import ActivityKit
 private let appGroupId = "group.com.taranek.liveactivityexpo"
 private let darwinNotificationName = "com.taranek.liveactivityexpo.activityAction" as CFString
 
-private let stepLabels = ["Placed", "Preparing", "Cooking", "Out for delivery", "Delivered"]
-private let stepProgress = [0.0, 0.25, 0.5, 0.75, 1.0]
-
 public class LiveActivityModule: Module {
     private static weak var current: LiveActivityModule?
     private var observationTask: Task<Void, Never>?
@@ -18,7 +15,7 @@ public class LiveActivityModule: Module {
     public func definition() -> ModuleDefinition {
         Name("LiveActivity")
 
-        Events("onActivityStateChange")
+        Events("onActivityStateChange", "onWidgetAction")
 
         OnStartObserving {
             LiveActivityModule.current = self
@@ -95,7 +92,7 @@ public class LiveActivityModule: Module {
             }
         }
 
-        AsyncFunction("endActivity") { (activityId: String) in
+        AsyncFunction("endActivity") { (activityId: String, options: [String: Any]?) in
             if #available(iOS 16.2, *) {
                 self.observationTask?.cancel()
                 self.observationTask = nil
@@ -106,7 +103,22 @@ public class LiveActivityModule: Module {
                     throw LiveActivityError.activityNotFound
                 }
 
-                await activity.end(nil, dismissalPolicy: .immediate)
+                let finalContent: ActivityContent<LiveActivityAttributes.ContentState>?
+                if let opts = options,
+                   let value = opts["value"] as? String,
+                   let progress = opts["progress"] as? Double {
+                    let state = LiveActivityAttributes.ContentState(value: value, progress: progress)
+                    finalContent = ActivityContent(state: state, staleDate: nil)
+                } else {
+                    finalContent = nil
+                }
+
+                let dismissDelay = (options?["dismissAfterSeconds"] as? Double) ?? 0
+                let policy: ActivityUIDismissalPolicy = dismissDelay > 0
+                    ? .after(.now + dismissDelay)
+                    : .immediate
+
+                await activity.end(finalContent, dismissalPolicy: policy)
             } else {
                 throw LiveActivityError.unsupportedOS
             }
@@ -144,40 +156,11 @@ public class LiveActivityModule: Module {
     }
 
     private func handleWidgetAction() {
-        if #available(iOS 16.2, *) {
-            let defaults = UserDefaults(suiteName: appGroupId)
-            guard let action = defaults?.string(forKey: "pendingAction") else { return }
-            defaults?.removeObject(forKey: "pendingAction")
+        let defaults = UserDefaults(suiteName: appGroupId)
+        guard let action = defaults?.string(forKey: "pendingAction") else { return }
+        defaults?.removeObject(forKey: "pendingAction")
 
-            guard let activity = Activity<LiveActivityAttributes>.activities.first else { return }
-
-            Task {
-                if action == "advance" {
-                    let currentValue = activity.content.state.value
-                    let currentIndex = stepLabels.firstIndex(of: currentValue) ?? 0
-                    let nextIndex = min(currentIndex + 1, stepLabels.count - 1)
-
-                    let newState = LiveActivityAttributes.ContentState(
-                        value: stepLabels[nextIndex],
-                        progress: stepProgress[nextIndex]
-                    )
-
-                    if nextIndex == stepLabels.count - 1 {
-                        // Last step — show final state, then dismiss after 4 seconds
-                        let finalContent = ActivityContent(state: newState, staleDate: nil)
-                        self.observationTask?.cancel()
-                        self.observationTask = nil
-                        await activity.end(finalContent, dismissalPolicy: .after(.now + 4))
-                    } else {
-                        await activity.update(ActivityContent(state: newState, staleDate: nil))
-                    }
-                } else if action == "end" {
-                    self.observationTask?.cancel()
-                    self.observationTask = nil
-                    await activity.end(nil, dismissalPolicy: .immediate)
-                }
-            }
-        }
+        self.sendEvent("onWidgetAction", ["action": action])
     }
 
     // MARK: - Content updates observation (activity → React events)
