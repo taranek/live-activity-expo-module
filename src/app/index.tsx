@@ -263,6 +263,11 @@ export default function HomeScreen() {
                 <ThemedText style={styles.stepEmoji}>
                   {currentStep.emoji}
                 </ThemedText>
+                <ThemedText
+                  style={[styles.stepSubtitle, { color: mutedText }]}
+                >
+                  {`Step ${stepIndex + 1} of ${STEPS.length}`}
+                </ThemedText>
                 <ThemedText style={styles.stepLabel}>
                   {currentStep.label}
                 </ThemedText>
@@ -477,6 +482,12 @@ const styles = StyleSheet.create({
   },
   stepEmoji: {
     fontSize: 48,
+  },
+  stepSubtitle: {
+    fontSize: 13,
+    fontWeight: '500',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   stepLabel: {
     fontSize: 22,

@@ -77,11 +77,11 @@ struct LiveActivityWidgetBundle: WidgetBundle {
 struct LiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: LiveActivityAttributes.self) { context in
-            HStack(spacing: 16) {
+            VStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(context.attributes.title)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
+                        .font(.caption)
+                        .fontWeight(.medium)
                         .foregroundStyle(.secondary)
 
                     Text(context.state.value)
@@ -92,26 +92,25 @@ struct LiveActivityWidget: Widget {
                         .tint(context.state.progress >= 1.0 ? .green : .orange)
                 }
 
-                Spacer()
-
                 if context.state.progress < 1.0 {
-                    VStack(spacing: 8) {
+                    HStack(spacing: 8) {
                         Button(intent: AdvanceOrderIntent()) {
                             Text("Next")
                                 .font(.caption)
                                 .fontWeight(.bold)
                                 .foregroundStyle(.white)
-                                .frame(width: 64, height: 32)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 32)
                                 .background(.orange, in: RoundedRectangle(cornerRadius: 8))
                         }
                         .buttonStyle(.plain)
 
                         Button(intent: EndOrderIntent()) {
                             Text("Cancel")
-                                .font(.caption2)
+                                .font(.caption)
                                 .fontWeight(.medium)
                                 .foregroundStyle(.red)
-                                .frame(width: 64, height: 28)
+                                .frame(width: 72, height: 32)
                                 .background(.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
                         }
                         .buttonStyle(.plain)
@@ -122,7 +121,8 @@ struct LiveActivityWidget: Widget {
                             .font(.caption)
                             .fontWeight(.bold)
                             .foregroundStyle(.white)
-                            .frame(width: 64, height: 32)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 32)
                             .background(.green, in: RoundedRectangle(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
