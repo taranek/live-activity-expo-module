@@ -8,7 +8,8 @@
     "scheme": "liveactivityexpo",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.taranek.liveactivityexpo"
     },
     "android": {
       "adaptiveIcon": {
@@ -17,7 +18,8 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.taranek.liveactivityexpo"
     },
     "web": {
       "output": "static",
@@ -34,11 +36,15 @@
             "imageWidth": 76
           }
         }
-      ]
+      ],
+      "./plugins/withLiveActivity"
     ],
     "experiments": {
       "typedRoutes": true,
-      "reactCompiler": true
+      "reactCompiler": true,
+      "buildCacheProvider": {
+        "plugin": "expo-build-disk-cache"
+      }
     }
   }
 }
