@@ -7,6 +7,13 @@ import {
 export interface LiveActivityContentState {
   value: string;
   progress: number;
+  subtitle?: string;
+  actionLabel?: string;
+  cancelLabel?: string;
+  doneLabel?: string;
+  tintColor?: string;
+  /** SF Symbol name (e.g. "shippingbox.fill", "flame", "car.fill") */
+  icon?: string;
 }
 
 export interface StartActivityParams extends LiveActivityContentState {
@@ -59,6 +66,19 @@ export async function endActivity(
 
 export function getActivityState(): ActivityState | null {
   return LiveActivityNative.getActivityState();
+}
+
+/** Reads and clears any pending widget action from UserDefaults. Returns null if none. */
+export function getPendingAction(): "advance" | "end" | null {
+  return LiveActivityNative.getPendingAction() ?? null;
+}
+
+/** Write step data to shared UserDefaults so the widget can update the activity directly. */
+export function syncSteps(
+  steps: LiveActivityContentState[],
+  currentIndex: number
+): void {
+  LiveActivityNative.syncSteps(steps, currentIndex);
 }
 
 export function addActivityStateChangeListener(

@@ -24,16 +24,18 @@ import {
   updateActivity,
   endActivity,
   getActivityState,
+  getPendingAction,
+  syncSteps,
   addActivityStateChangeListener,
   addWidgetActionListener,
 } from '../../modules/live-activity';
 
 const STEPS = [
-  { label: 'Placed', emoji: '\uD83D\uDCCB', progress: 0 },
-  { label: 'Preparing', emoji: '\uD83E\uDDD1\u200D\uD83C\uDF73', progress: 0.25 },
-  { label: 'Cooking', emoji: '\uD83C\uDF73', progress: 0.5 },
-  { label: 'Out for delivery', emoji: '\uD83D\uDEF5', progress: 0.75 },
-  { label: 'Delivered', emoji: '\uD83C\uDF89', progress: 1.0 },
+  { label: 'Placed', emoji: '\uD83D\uDCCB', progress: 0, icon: 'list.clipboard' },
+  { label: 'Preparing', emoji: '\uD83E\uDDD1\u200D\uD83C\uDF73', progress: 0.25, icon: 'frying.pan' },
+  { label: 'Cooking', emoji: '\uD83C\uDF73', progress: 0.5, icon: 'flame' },
+  { label: 'Out for delivery', emoji: '\uD83D\uDEF5', progress: 0.75, icon: 'car.fill' },
+  { label: 'Delivered', emoji: '\uD83C\uDF89', progress: 1.0, icon: 'checkmark.circle.fill' },
 ] as const;
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -50,12 +52,27 @@ export default function HomeScreen() {
   const currentStep = STEPS[stepIndex];
   const isComplete = stepIndex === STEPS.length - 1;
 
+  const buildState = useCallback((index: number) => {
+    const step = STEPS[index];
+    return {
+      value: step.label,
+      progress: step.progress,
+      subtitle: 'Order #2137',
+      icon: step.icon,
+      actionLabel: index < STEPS.length - 2 ? 'Next' : 'Finish',
+      tintColor: '#FF6B35',
+    };
+  }, []);
+
+  // Precomputed step states for widget to use when app is suspended
+  const allStepStates = STEPS.map((_, i) => buildState(i));
+
   const handleStart = useCallback(async () => {
     try {
+      syncSteps(allStepStates, 0);
       const id = await startActivity({
         title: 'Order #2137',
-        value: STEPS[0].label,
-        progress: STEPS[0].progress,
+        ...buildState(0),
       });
       stepRef.current = 0;
       activityIdRef.current = id;
@@ -64,7 +81,7 @@ export default function HomeScreen() {
     } catch (e: any) {
       Alert.alert('Error', e.message);
     }
-  }, []);
+  }, [buildState, allStepStates]);
 
   const handleAdvance = useCallback(async () => {
     const id = activityIdRef.current;
@@ -73,14 +90,12 @@ export default function HomeScreen() {
       const next = Math.min(stepRef.current + 1, STEPS.length - 1);
       stepRef.current = next;
       setStepIndex(next);
-      await updateActivity(id, {
-        value: STEPS[next].label,
-        progress: STEPS[next].progress,
-      });
+      syncSteps(allStepStates, next);
+      await updateActivity(id, buildState(next));
     } catch (e: any) {
       Alert.alert('Error', e.message);
     }
-  }, []);
+  }, [buildState, allStepStates]);
 
   const handleEnd = useCallback(async () => {
     const id = activityIdRef.current;
@@ -97,7 +112,11 @@ export default function HomeScreen() {
   }, []);
 
   // Sync React state with native activity state when app comes to foreground
-  const syncFromNative = useCallback(() => {
+  const syncFromNative = useCallback(async () => {
+    // Consume any pending action flag (already handled by widget, just clear it)
+    getPendingAction();
+
+    // Sync state from the native activity
     const state = getActivityState();
     if (state) {
       activityIdRef.current = state.id;
@@ -116,38 +135,25 @@ export default function HomeScreen() {
     }
   }, []);
 
-  // Handle widget button taps — all logic lives here in TS
+  // Handle widget button taps — widget already updated the activity,
+  // we just sync React state here
   useEffect(() => {
-    const sub = addWidgetActionListener(async (event) => {
-      const id = activityIdRef.current;
-      if (!id) return;
-
+    const sub = addWidgetActionListener((event) => {
       if (event.action === 'advance') {
         const next = Math.min(stepRef.current + 1, STEPS.length - 1);
         stepRef.current = next;
         setStepIndex(next);
+        syncSteps(allStepStates, next);
 
         if (next === STEPS.length - 1) {
-          await endActivity(id, {
-            value: STEPS[next].label,
-            progress: STEPS[next].progress,
-            dismissAfterSeconds: 4,
-          });
-          // Reset after dismiss delay
           setTimeout(() => {
             activityIdRef.current = null;
             setActivityId(null);
             setStepIndex(0);
             stepRef.current = 0;
           }, 4000);
-        } else {
-          await updateActivity(id, {
-            value: STEPS[next].label,
-            progress: STEPS[next].progress,
-          });
         }
       } else if (event.action === 'end') {
-        await endActivity(id);
         activityIdRef.current = null;
         setActivityId(null);
         setStepIndex(0);
@@ -155,7 +161,7 @@ export default function HomeScreen() {
       }
     });
     return () => sub.remove();
-  }, []);
+  }, [allStepStates]);
 
   // Listen for real-time state changes from the widget (via contentUpdates)
   useEffect(() => {

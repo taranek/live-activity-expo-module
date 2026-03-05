@@ -15,6 +15,12 @@ struct LiveActivityAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable {
         var value: String
         var progress: Double
+        var subtitle: String?
+        var actionLabel: String?
+        var cancelLabel: String?
+        var doneLabel: String?
+        var tintColor: String?
+        var icon: String?
     }
 }
 `;
@@ -27,6 +33,44 @@ import ActivityKit
 let appGroupId = "group.${bundleId}"
 let darwinNotificationName = "${bundleId}.activityAction" as CFString
 
+// MARK: - Shared helpers for reading step data from UserDefaults
+
+private func readSteps() -> [[String: Any]]? {
+    let defaults = UserDefaults(suiteName: appGroupId)
+    guard let data = defaults?.data(forKey: "steps"),
+          let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+        return nil
+    }
+    return arr
+}
+
+private func contentStateFromStep(_ step: [String: Any]) -> LiveActivityAttributes.ContentState {
+    LiveActivityAttributes.ContentState(
+        value: step["value"] as? String ?? "",
+        progress: step["progress"] as? Double ?? 0.0,
+        subtitle: step["subtitle"] as? String,
+        actionLabel: step["actionLabel"] as? String,
+        cancelLabel: step["cancelLabel"] as? String,
+        doneLabel: step["doneLabel"] as? String,
+        tintColor: step["tintColor"] as? String,
+        icon: step["icon"] as? String
+    )
+}
+
+private func notifyApp(action: String) {
+    let defaults = UserDefaults(suiteName: appGroupId)
+    defaults?.set(action, forKey: "pendingAction")
+    defaults?.synchronize()
+
+    CFNotificationCenterPostNotification(
+        CFNotificationCenterGetDarwinNotifyCenter(),
+        CFNotificationName(darwinNotificationName),
+        nil, nil, true
+    )
+}
+
+// MARK: - Intents (update activity directly + IPC to sync React state)
+
 struct AdvanceOrderIntent: LiveActivityIntent {
     static var title: LocalizedStringResource = "Advance Order"
     static var description: IntentDescription = "Move the order to the next step"
@@ -35,14 +79,28 @@ struct AdvanceOrderIntent: LiveActivityIntent {
 
     func perform() async throws -> some IntentResult {
         let defaults = UserDefaults(suiteName: appGroupId)
-        defaults?.set("advance", forKey: "pendingAction")
+        let steps = readSteps() ?? []
+        let currentIndex = defaults?.integer(forKey: "currentStepIndex") ?? 0
+        let nextIndex = min(currentIndex + 1, steps.count - 1)
+
+        if nextIndex < steps.count,
+           let activity = Activity<LiveActivityAttributes>.activities.first {
+            let state = contentStateFromStep(steps[nextIndex])
+            if nextIndex == steps.count - 1 {
+                await activity.end(
+                    ActivityContent(state: state, staleDate: nil),
+                    dismissalPolicy: .after(.now + 4)
+                )
+            } else {
+                await activity.update(ActivityContent(state: state, staleDate: nil))
+            }
+        }
+
+        defaults?.set(nextIndex, forKey: "currentStepIndex")
         defaults?.synchronize()
 
-        CFNotificationCenterPostNotification(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName(darwinNotificationName),
-            nil, nil, true
-        )
+        notifyApp(action: "advance")
+
         return .result()
     }
 }
@@ -54,18 +112,30 @@ struct EndOrderIntent: LiveActivityIntent {
     init() {}
 
     func perform() async throws -> some IntentResult {
-        let defaults = UserDefaults(suiteName: appGroupId)
-        defaults?.set("end", forKey: "pendingAction")
-        defaults?.synchronize()
+        if let activity = Activity<LiveActivityAttributes>.activities.first {
+            await activity.end(nil, dismissalPolicy: .immediate)
+        }
 
-        CFNotificationCenterPostNotification(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName(darwinNotificationName),
-            nil, nil, true
-        )
+        notifyApp(action: "end")
+
         return .result()
     }
 }
+
+// MARK: - Helpers
+
+extension Color {
+    init?(hex: String?) {
+        guard let hex = hex?.trimmingCharacters(in: .init(charactersIn: "#")) else { return nil }
+        guard hex.count == 6, let int = UInt64(hex, radix: 16) else { return nil }
+        let r = Double((int >> 16) & 0xFF) / 255
+        let g = Double((int >> 8) & 0xFF) / 255
+        let b = Double(int & 0xFF) / 255
+        self.init(red: r, green: g, blue: b)
+    }
+}
+
+// MARK: - Widget bundle
 
 @main
 struct LiveActivityWidgetBundle: WidgetBundle {
@@ -74,39 +144,56 @@ struct LiveActivityWidgetBundle: WidgetBundle {
     }
 }
 
+// MARK: - Widget (dumb template — content driven by TS via ContentState)
+
 struct LiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: LiveActivityAttributes.self) { context in
-            VStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(context.attributes.title)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.secondary)
+            let tint = Color(hex: context.state.tintColor) ?? .orange
+            let isComplete = context.state.progress >= 1.0
+            let actionLabel = context.state.actionLabel ?? "Next"
+            let cancelLabel = context.state.cancelLabel ?? "Cancel"
+            let doneLabel = context.state.doneLabel ?? "Done"
 
-                    Text(context.state.value)
-                        .font(.title2)
-                        .fontWeight(.bold)
+            VStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    if let subtitle = context.state.subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack {
+                        if let icon = context.state.icon {
+                            Image(systemName: icon)
+                                .font(.title3)
+                                .foregroundStyle(tint)
+                        }
+                        Text(context.state.value)
+                            .font(.title2)
+                            .fontWeight(.bold)
+                    }
 
                     ProgressView(value: context.state.progress)
-                        .tint(context.state.progress >= 1.0 ? .green : .orange)
+                        .tint(isComplete ? .green : tint)
                 }
 
-                if context.state.progress < 1.0 {
+                if !isComplete {
                     HStack(spacing: 8) {
                         Button(intent: AdvanceOrderIntent()) {
-                            Text("Next")
+                            Text(actionLabel)
                                 .font(.caption)
                                 .fontWeight(.bold)
                                 .foregroundStyle(.white)
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 32)
-                                .background(.orange, in: RoundedRectangle(cornerRadius: 8))
+                                .background(tint, in: RoundedRectangle(cornerRadius: 8))
                         }
                         .buttonStyle(.plain)
 
                         Button(intent: EndOrderIntent()) {
-                            Text("Cancel")
+                            Text(cancelLabel)
                                 .font(.caption)
                                 .fontWeight(.medium)
                                 .foregroundStyle(.red)
@@ -117,7 +204,7 @@ struct LiveActivityWidget: Widget {
                     }
                 } else {
                     Button(intent: EndOrderIntent()) {
-                        Text("Done")
+                        Text(doneLabel)
                             .font(.caption)
                             .fontWeight(.bold)
                             .foregroundStyle(.white)
@@ -133,9 +220,11 @@ struct LiveActivityWidget: Widget {
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(context.attributes.title)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                        if let subtitle = context.state.subtitle {
+                            Text(subtitle)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                         Text(context.state.value)
                             .font(.subheadline)
                             .fontWeight(.bold)
@@ -144,31 +233,42 @@ struct LiveActivityWidget: Widget {
                 DynamicIslandExpandedRegion(.trailing) {
                     if context.state.progress < 1.0 {
                         Button(intent: AdvanceOrderIntent()) {
-                            Text("Next")
+                            Text(context.state.actionLabel ?? "Next")
                                 .font(.caption2)
                                 .fontWeight(.bold)
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 6)
-                                .background(.orange, in: Capsule())
+                                .background(Color(hex: context.state.tintColor) ?? .orange, in: Capsule())
                         }
                         .buttonStyle(.plain)
                     }
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     ProgressView(value: context.state.progress)
-                        .tint(context.state.progress >= 1.0 ? .green : .orange)
+                        .tint(context.state.progress >= 1.0 ? .green : (Color(hex: context.state.tintColor) ?? .orange))
                 }
             } compactLeading: {
-                Text(context.attributes.title)
-                    .font(.caption2)
-                    .fontWeight(.semibold)
+                if let icon = context.state.icon {
+                    Image(systemName: icon)
+                        .font(.caption2)
+                        .foregroundStyle(Color(hex: context.state.tintColor) ?? .orange)
+                } else {
+                    Text(context.attributes.title)
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                }
             } compactTrailing: {
                 Text(context.state.value)
                     .font(.caption2)
             } minimal: {
-                Image(systemName: "shippingbox.fill")
-                    .font(.caption2)
+                if let icon = context.state.icon {
+                    Image(systemName: icon)
+                        .font(.caption2)
+                } else {
+                    Image(systemName: "shippingbox.fill")
+                        .font(.caption2)
+                }
             }
         }
     }
